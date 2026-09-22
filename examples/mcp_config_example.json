@@ -1,0 +1,38 @@
+{
+  "_说明": "把下面 mcpServers 里的条目合并进你 MCP 客户端的配置文件即可。不同客户端的配置文件位置不同，见 README 的『接入到 MCP 客户端』一节。",
+
+  "mcpServers": {
+    "faster-mcp": {
+      "_方式A_推荐_已pip安装": "如果执行过 `pip install -e .`，可以直接用命令名启动，不依赖当前目录。",
+      "command": "faster-mcp",
+      "args": [],
+      "env": {
+        "FASTER_MCP_NAME": "Faster MCP",
+        "FASTER_MCP_LOG_LEVEL": "INFO"
+      }
+    },
+
+    "faster-mcp-python-module": {
+      "_方式B_无需安装": "不安装也能用：直接以模块方式启动。需保证 working directory 是项目根目录，或把项目根加进 PYTHONPATH。",
+      "command": "python",
+      "args": ["-m", "faster_mcp"],
+      "env": {
+        "FASTER_MCP_LOG_LEVEL": "INFO"
+      }
+    },
+
+    "faster-mcp-calculator-only": {
+      "_方式C_按需瘦身": "只暴露计算器功能。给模型更少的工具，通常能提高它的工具选择准确率。",
+      "command": "faster-mcp",
+      "args": [],
+      "env": {
+        "FASTER_MCP_FEATURES": "calculator"
+      }
+    },
+
+    "faster-mcp-http": {
+      "_方式D_远程或跨进程": "先手动运行 `faster-mcp --http --port 8000`，再让客户端以 HTTP 方式连接。适合多个客户端共享一个服务实例。",
+      "url": "http://127.0.0.1:8000/mcp"
+    }
+  }
+}

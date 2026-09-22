@@ -1,0 +1,15 @@
+{
+  "_说明": "把本文件内容合并进你的 MCP 客户端配置。Windows 下建议用绝对路径的 python，避免 PATH 差异。",
+
+  "mcpServers": {
+    "faster-mcp": {
+      "command": "F:\\Faster_MCP\\.venv\\Scripts\\python.exe",
+      "args": ["-m", "faster_mcp"],
+      "env": {
+        "PYTHONPATH": "F:\\Faster_MCP",
+        "FASTER_MCP_LOG_LEVEL": "INFO",
+        "FASTER_MCP_FEATURES": "*"
+      }
+    }
+  }
+}

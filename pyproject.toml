@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "faster-mcp"
+version = "0.1.0"
+description = "Faster MCP - a multi-feature MCP server for LLMs (calculator first, more to come)"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Hanako" }]
+keywords = ["mcp", "llm", "calculator", "tools"]
+
+# 依赖说明：
+#   mcp           官方 Model Context Protocol Python SDK（提供 FastMCP）
+#   pydantic      工具参数校验/序列化（mcp 已间接依赖，显式声明便于阅读）
+# 注意：官方 SDK v2 已发布。pip install mcp 现在装的是 2.x。
+# 为了不让未来升级悄悄破坏本服务，这里先锁在 1.x 稳定线（>=1.2,<2）。
+# 想要 v2 时，把上限放开成 >=1.2,<3 并跑一遍 tests/ 即可。
+dependencies = [
+    "mcp>=1.2,<2",
+    "pydantic>=2.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4",
+]
+
+[project.scripts]
+# 安装后可直接执行的命令名
+faster-mcp = "faster_mcp.server:main"
+
+[tool.setuptools.packages.find]
+include = ["faster_mcp*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

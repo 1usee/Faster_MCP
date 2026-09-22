@@ -1,0 +1,7 @@
+# 运行依赖（与 pyproject.toml 保持一致）
+# 只装了这一个 SDK，就能起一个标准 MCP 服务端。
+mcp>=1.2,<2
+pydantic>=2.0
+
+# 开发/测试依赖（可选）
+# pytest>=7.4
