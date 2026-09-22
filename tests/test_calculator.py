@@ -100,8 +100,27 @@ def test_calculate_returns_structured_payload(feature: CalculatorFeature) -> Non
 
     assert payload["expression"] == "(1200 * 1.13) / 4"
     assert payload["result"] == "339"
-    assert payload["raw_value"] == pytest.approx(339.0)
+    # 不用 approx：raw_value 是对外承诺的"精确值"，任何精度损失都应立即失败
+    assert payload["raw_value"] == 339.0
     assert payload["value_type"] == "float"
+
+
+def test_raw_value_keeps_full_precision(feature: CalculatorFeature) -> None:
+    """raw_value 必须是全精度，不能被展示层的 12 位收窄影响。
+
+    这是本工具"精确计算"卖点的最后一道防线：展示字符串可以为了可读性
+    收窄到 12 位有效数字，但 raw_value 必须与 Python 原生计算结果**完全相等**。
+    """
+    assert feature.calculate("pi")["raw_value"] == 3.141592653589793
+    assert feature.calculate("1/3")["raw_value"] == 1 / 3
+    assert feature.calculate("2/7")["raw_value"] == 2 / 7
+    assert feature.calculate("sin(1)")["raw_value"] == 0.8414709848078965
+
+
+def test_float_result_display_still_cleans_noise(feature: CalculatorFeature) -> None:
+    """展示层继续收敛浮点噪声，但只在确实是噪声的时候。"""
+    assert feature.calculate("0.1 + 0.2")["result"] == "0.3"
+    assert feature.calculate("0.1 + 0.2")["raw_value"] == 0.3
 
 
 def test_calculate_exposes_intermediate_variables(feature: CalculatorFeature) -> None:
@@ -135,7 +154,24 @@ def test_integer_float_displays_without_decimal(feature: CalculatorFeature) -> N
 def test_large_integer_keeps_full_precision(feature: CalculatorFeature) -> None:
     payload = feature.calculate("2 ** 100")
     assert payload["result"] == str(2**100)
+    assert payload["raw_value"] == 2**100
     assert payload["value_type"] == "integer"
+
+
+def test_astronomically_large_integer_is_handled(feature: CalculatorFeature) -> None:
+    """超过 int→str 转换上限的结果必须给出友好提示，而不是抛 ValueError。
+
+    Python 3.11+ 默认限制 int 转字符串的位数（4300 位），超过会抛
+    ValueError。若不拦，这会是唯一一条能穿透到模型的未捕获异常。
+
+    构造：幂指数的上限是 1000，单个 2**1000 只有约 302 位，
+    所以用连乘绕过（乘法本身没有位数限制，受限的只是字面量长度）。
+    """
+    expression = " * ".join(["2 ** 1000"] * 20)  # 约 6000 位
+    payload = feature.calculate(expression)
+    assert payload["value_type"] == "integer"
+    assert "超大整数" in payload["result"]
+    assert any("log10" in note for note in payload["notes"])
 
 
 def test_boolean_result(feature: CalculatorFeature) -> None:
@@ -203,6 +239,32 @@ def test_chinese_unit_names() -> None:
 def test_degree_symbol_is_tolerated() -> None:
     """用户会说"度"，不该因为多了个 ° 就失败。"""
     assert convert(100, "°c", "°f").result == pytest.approx(212.0)
+
+
+@pytest.mark.parametrize(
+    "alias",
+    ["m3", "m^3", "m³", "立方米"],
+)
+def test_cubic_metre_aliases(alias: str) -> None:
+    """立方米的各种写法都应识别。
+
+    为什么重要：体积表以升为基准，'m3' 这种键名字面看不出基准，
+    模型很可能直接照抄用户的 'm³' 或 'm^3'。缺别名会直接报错。
+    """
+    assert convert(1, alias, "l").result == pytest.approx(1000.0)
+
+
+@pytest.mark.parametrize(
+    "alias",
+    ["cm3", "cm^3", "cm³", "立方厘米"],
+)
+def test_cubic_centimetre_aliases(alias: str) -> None:
+    """1 cm³ = 1 mL，这条等式的数值必须准确。"""
+    assert convert(1, alias, "ml").result == pytest.approx(1.0)
+
+
+def test_cubic_roundtrip() -> None:
+    assert convert(2.5, "m³", "cm³").result == pytest.approx(2.5e6)
 
 
 def test_convert_wrong_category_is_rejected() -> None:

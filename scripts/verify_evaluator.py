@@ -79,6 +79,27 @@ def main() -> int:
 
     print()
     print("=" * 78)
+    print("B2. 浮点精度（不能被\"好看\"吃掉有效数字）")
+    print("=" * 78)
+    import math
+
+    expect_value("pi", math.pi)
+    expect_value("1 / 3", 1 / 3)
+    expect_value("2 / 7", 2 / 7)
+    expect_value("sin(1)", math.sin(1))
+    # 反向：真正的浮点噪声仍要被收敛
+    expect_value("0.1 + 0.2", 0.3)
+    expect_value("1.1 * 3", 3.3)
+
+    print()
+    print("=" * 78)
+    print("B3. 布尔不能被当成 1/0")
+    print("=" * 78)
+    expect_rejected("mean(True, False)")
+    expect_rejected("sum(1, True)")
+
+    print()
+    print("=" * 78)
     print("C. 函数与常量")
     print("=" * 78)
     expect_value("sqrt(144)", 12.0)

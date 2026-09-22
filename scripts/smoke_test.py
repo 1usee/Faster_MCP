@@ -97,6 +97,9 @@ def main() -> int:
         ("统计", "mean(3, 7, 11)", "7"),
         ("布尔表达式", "3 > 2", "True"),
         ("浮点误差收敛", "0.1 + 0.2", "0.3"),
+        # 下面两条守住"精确计算"卖点：不能被"好看"吃掉有效数字
+        ("pi 全精度", "pi", repr(3.141592653589793)),
+        ("1/3 全精度", "1 / 3", repr(1 / 3)),
     ]
 
     for label, expression, expected in cases:
@@ -124,6 +127,9 @@ def main() -> int:
         ("数据量", 1, "gb", "mb", 1024.0),
         ("质量", 1, "kg", "lb", 2.204622),
         ("时间", 1, "d", "h", 24.0),
+        # 体积别名：模型可能直接照拄 m³ / m^3
+        ("立方米别名", 1, "m³", "l", 1000.0),
+        ("立方厘米别名", 1, "cm^3", "ml", 1.0),
     ]
 
     for label, value, src, dst, expected in conv_cases:
@@ -148,6 +154,8 @@ def main() -> int:
         "globals()",
         "lambda x: x",
         "[x for x in range(3)]",
+        # 布尔不能被静默当成 1/0：数字函数必须明确拒绝
+        "mean(True, False)",
     ]
 
     for expression in dangerous:

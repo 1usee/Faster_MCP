@@ -111,8 +111,10 @@ class Feature:
     dependencies: tuple[str, ...] = ()
     version: str = "0.0.0"
 
-    # 装饰器登记下来的工具，按声明顺序保存
-    _declared_tools: list[ToolSpec] = []
+    # 装饰器登记下来的方法（函数对象本身），按声明顺序保存。
+    # 注意：这里存的是**未绑定**的函数，绑定发生在 registry 收集时。
+    # 之所以不用 ToolSpec：ToolSpec 需要绑定后的签名，而类定义阶段拿不到实例。
+    _declared_tools: list[Any] = []
 
     # ---- 生命周期钩子（可选覆盖） ---------------------------------------- #
     def setup(self) -> None:
@@ -132,10 +134,14 @@ class Feature:
     def tools(self) -> list[ToolSpec]:
         """返回本功能提供的全部工具。
 
-        默认实现返回装饰器登记的 `_declared_tools`。
-        想用显式声明风格时，覆盖本方法即可。
+        默认返回空列表——装饰器风格的工具**不经过这里**，而是由 registry 扫
+        `__mcp_tool__` 元数据自动收集（因为那需要实例，类定义阶段拿不到）。
+
+        本方法专供**显式声明风格**使用：需要动态生成工具名、或把同一个函数
+        以多个名字暴露时，覆盖本方法返回 ToolSpec 列表即可。
+        显式声明的工具与装饰器风格可以混用；同名时显式声明优先。
         """
-        return list(self._declared_tools)
+        return []
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         """为每个子类准备**独立**的 _declared_tools 列表。
@@ -366,8 +372,8 @@ class FeatureRegistry:
         specs: list[ToolSpec] = []
 
         # 先调用 tools() 拿到显式声明的工具，再扫装饰器登记的方法。
-        # 顺序很重要：**显式声明优先**。因为 tools() 的默认实现返回的正是
-        # 装饰器登记结果，所以"显式声明覆盖同名装饰器工具"这个语义能自然成立。
+        # 顺序很重要：**显式声明优先**。如果某个工具名同时出现在 tools() 返回值和
+        # 装饰器登记结果里，就采用 tools() 的那份（覆盖语义在下面用 seen 实现）。
         try:
             explicit = feature.tools()
         except Exception as exc:  # noqa: BLE001 - 转换成启动期错误，便于定位
@@ -402,6 +408,8 @@ class FeatureRegistry:
             meta = getattr(method, "__mcp_tool__", None)
             if meta is None:
                 continue
+            if not callable(method):
+                continue
             if meta["name"] in seen:
                 # 已被显式声明覆盖，跳过
                 continue
@@ -418,23 +426,6 @@ class FeatureRegistry:
                 )
             )
             seen.add(meta["name"])
-
-        # 合并显式声明的工具（若子类覆盖了 tools()）
-        try:
-            explicit = feature.tools()
-        except Exception as exc:  # noqa: BLE001 - 转换成启动期错误，便于定位
-            raise FeatureLoadError(
-                f"功能 '{feature.name}' 的 tools() 执行失败：{exc}"
-            ) from exc
-
-        declared_names = {s.name for s in specs}
-        for spec in explicit:
-            if spec.name in declared_names:
-                # tools() 的默认实现返回的就是装饰器登记结果，会走到这里，忽略即可
-                continue
-            if not spec.feature_name:
-                spec.feature_name = feature.name
-            specs.append(spec)
 
         return specs
 

@@ -7,12 +7,12 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import dataclass, field
 
 # 环境变量前缀，避免与宿主环境里的同名变量冲突
 ENV_PREFIX = "FASTER_MCP_"
-
 ENV_NAME = ENV_PREFIX + "NAME"
 ENV_FEATURES = ENV_PREFIX + "FEATURES"
 ENV_DISABLED = ENV_PREFIX + "DISABLED"
@@ -50,6 +50,29 @@ class Settings:
     disabled_features: list[str] = field(default_factory=list)
     log_level: str = "INFO"
 
+    def __post_init__(self) -> None:
+        """把不合法的配置项纠正为安全默认值，并给出警告。
+
+        为什么用警告而不是报错：环境变量写错是很常见的手误，
+        而服务本身没必要因此启动失败。但如果静默降级，排查时就不知道
+        "为什么日志没变详细"。所以选"纠正 + 提示"这个中间态。
+        """
+        if not self.server_name or not self.server_name.strip():
+            logging.getLogger(__name__).warning(
+                "%s 为空，已回退为默认服务名 'Faster MCP'。", ENV_NAME
+            )
+            self.server_name = "Faster MCP"
+
+        level = self.log_level.strip().upper()
+        if not isinstance(getattr(logging, level, None), int) or level == "NOTSET":
+            logging.getLogger(__name__).warning(
+                "%s=%r 不是合法的日志级别，已回退为 INFO。合法值：DEBUG/INFO/WARNING/ERROR/CRITICAL。",
+                ENV_LOG_LEVEL,
+                self.log_level,
+            )
+            level = "INFO"
+        self.log_level = level
+
     def is_feature_enabled(self, feature_name: str) -> bool:
         """判断某个功能是否应当被启用（黑名单优先）。"""
         if feature_name in self.disabled_features:
@@ -68,5 +91,5 @@ class Settings:
             server_name=source.get(ENV_NAME, "Faster MCP"),
             enabled_features=enabled or ["*"],
             disabled_features=_split_csv(source.get(ENV_DISABLED)),
-            log_level=source.get(ENV_LOG_LEVEL, "INFO").upper(),
+            log_level=source.get(ENV_LOG_LEVEL, "INFO"),
         )

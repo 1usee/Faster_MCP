@@ -21,7 +21,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from ...errors import ToolInputError
-from .safe_eval import evaluate
+from .safe_eval import MAX_INT_DIGITS, evaluate
 
 # describe_capabilities 由 feature 层调用，这里转出以便统一从 engine 访问能力清单。
 from .safe_eval import describe_capabilities  # noqa: F401
@@ -80,12 +80,23 @@ def format_value(value: Any) -> str:
         为什么要收窄到 12 位：`0.1 + 0.2` 在双精度下是 0.30000000000000004，
         直接给模型会污染它的后续推理。取 12 位有效数字既能表达精度，
         又能让常见浮点误差"消失"。
+        注意：这里收窄的只是**展示字符串**，`raw_value` 始终是全精度的。
       - 序列 → 逐个格式化后拼接
     """
     if isinstance(value, bool):
         return "True" if value else "False"
 
     if isinstance(value, int):
+        # Python 3.11+ 对 int→str 有位数上限（默认 4300 位），
+        # 超过会直接抛 ValueError。与其让未捕获异常穿到模型，
+        # 不如给一个明确的替代建议。
+        # 十进制位数 ≈ bit_length * log10(2)。
+        if int(value.bit_length() * 0.30103) + 1 > MAX_INT_DIGITS:
+            digits = int(value.bit_length() * 0.30103) + 1
+            return (
+                f"<超大整数：约 {digits} 位，"
+                "超过展示上限；请在表达式中用 log10() 或科学计数法表示>"
+            )
         return str(value)
 
     if isinstance(value, float):
@@ -120,7 +131,10 @@ def _collect_values(expression: str, value: Any) -> dict[str, Any]:
     for statement in _split_statements(expression):
         try:
             _eval_one(statement, scope)
-        except Exception:  # noqa: BLE001 - 变量收集是辅助信息，失败不影响主结果
+        except ToolInputError:
+            # 只吞"预料之内"的失败：主流程已经成功求值过一次，
+            # 这里再报输入错误，说明该语句在收集视角下无法重现，
+            # 属正常的辅助信息缺失，停止收集即可。
             break
 
     # 只保留用户自定义的变量（排除常量）
@@ -147,7 +161,15 @@ def compute(expression: str, variables: dict[str, Any] | None = None) -> Calcula
                 "浮点结果已按 12 位有效数字显示；如需更多位数请在表达式中用 round() 指定。"
             )
     elif isinstance(value, int) and abs(value) >= 10**15:
-        notes.append("这是一个大整数，已精确表示（未做浮点近似）。")
+        # 十进位数 = log10(2) * 位数，约 0.30103 * bit_length
+        digits = int(value.bit_length() * 0.30103) + 1
+        if digits > MAX_INT_DIGITS:
+            notes.append(
+                f"结果是一个约 {digits} 位的巨大整数，已超出展示上限；"
+                "请在表达式中用 log10() 取阶数，或用科学计数法表示。"
+            )
+        else:
+            notes.append("这是一个大整数，已精确表示（未做浮点近似）。")
 
     return CalculationResult(
         expression=expression,
@@ -186,6 +208,11 @@ _LINEAR_UNITS: dict[str, dict[str, float]] = {
         # 基准：升
         "l": 1.0, "ml": 0.001, "cl": 0.01, "dl": 0.1,
         "m3": 1000.0, "cm3": 0.001,
+        # 立方米/立方厘米的其它写法：模型可能直接照抄"m³"或"m^3"，
+        # 也可能因为标错基准而把体积和长度搞混，多给几种别名能减少报错。
+        "m^3": 1000.0, "m³": 1000.0, "立方米": 1000.0,
+        "cm^3": 0.001, "cm³": 0.001, "立方厘米": 0.001,
+        "mm3": 1e-6, "mm^3": 1e-6, "mm³": 1e-6, "立方毫米": 1e-6,
         "gal": 3.785411784,        # 美制加仑
         "qt": 0.946352946,         # 美制夸脱
         "pt": 0.473176473,         # 美制品脱
@@ -193,7 +220,7 @@ _LINEAR_UNITS: dict[str, dict[str, float]] = {
         "floz": 0.0295735295625,   # 美制液量盎司
         "tbsp": 0.01478676478125,
         "tsp": 0.00492892159375,
-        "升": 1.0, "毫升": 0.001, "立方米": 1000.0, "加仑": 3.785411784,
+        "升": 1.0, "毫升": 0.001, "加仑": 3.785411784,
     },
     "time": {
         # 基准：秒

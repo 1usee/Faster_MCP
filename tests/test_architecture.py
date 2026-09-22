@@ -49,6 +49,29 @@ def test_load_features_respects_blacklist() -> None:
 
 
 # --------------------------------------------------------------------------- #
+# 配置健壮性
+# --------------------------------------------------------------------------- #
+def test_settings_rejects_blank_server_name() -> None:
+    """空服务名会让客户端里显示成空白，应当回退到默认值。"""
+    settings = Settings.from_env({"FASTER_MCP_NAME": "   "})
+    assert settings.server_name == "Faster MCP"
+
+
+def test_settings_normalizes_log_level_case() -> None:
+    assert Settings.from_env({"FASTER_MCP_LOG_LEVEL": "debug"}).log_level == "DEBUG"
+
+
+def test_settings_falls_back_on_invalid_log_level() -> None:
+    """非法日志级别不应导致崩，但也不能静默生效——回退到 INFO。"""
+    settings = Settings.from_env({"FASTER_MCP_LOG_LEVEL": "VERBOSE"})
+    assert settings.log_level == "INFO"
+
+
+def test_settings_default_log_level() -> None:
+    assert Settings.from_env({}).log_level == "INFO"
+
+
+# --------------------------------------------------------------------------- #
 # 注册表契约
 # --------------------------------------------------------------------------- #
 class _DummyFeature(Feature):

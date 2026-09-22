@@ -26,14 +26,21 @@ Faster_MCP/
 │        ├─ engine.py              # 计算引擎（纯函数，可独立测试）
 │        └─ safe_eval.py           # 安全表达式求值器（AST 白名单）
 ├─ tests/                          # 测试
-│  ├─ test_safe_eval.py
-│  └─ test_calculator.py
+│  ├─ test_safe_eval.py            # 引擎层：算得对不对、安全不安全
+│  ├─ test_calculator.py           # 工具层：能被调用、参数校验、结果格式
+│  └─ test_architecture.py         # 架构层：自动发现、依赖排序、可扩展承诺
 ├─ docs/
-│  └─ EXTENDING.md                 # ★ 新功能开发指南（加功能前必看）
+│  ├─ EXTENDING.md                 # ★ 新功能开发指南（加功能前必看）
+│  ├─ ARCHITECTURE.md              # 启动流程与分层设计
+│  ├─ design-notes.md              # 关键设计决策与取舍理由
+│  ├─ review-report.html           # 代码审查报告
+│  └─ README.md                    # 文档索引
 ├─ examples/
-│  └─ mcp_config_example.json      # 各类 MCP 客户端的接入配置示例
+│  ├─ mcp_config_example.json      # 各类 MCP 客户端的接入配置示例
+│  └─ mcp_config_windows_absolute.json  # Windows 绝对路径写法
 ├─ scripts/
-│  └─ smoke_test.py                # 不装客户端的自检脚本
+│  ├─ smoke_test.py                # 不装客户端的自检脚本
+│  └─ verify_evaluator.py          # 零依赖验证求值器与精度
 ├─ pyproject.toml
 ├─ requirements.txt
 ├─ .gitignore
@@ -57,6 +64,11 @@ pip install -r requirements.txt
 # 或者把本包以开发模式装上（会获得 faster_mcp 包和 faster-mcp 命令）
 pip install -e .
 ```
+
+> **依赖版本说明**：`mcp` 锁在 `>=1.2,<2`。官方 SDK v2 是破坏性重构，
+> 升上去需要改 `server.py` 的挂载方式。如果你在某个具体版本上跑通了，
+> 建议把 `requirements.txt` 改成精确版本（如 `mcp==1.9.4`）并在提交信息里注明——
+> "范围"只是避免冲突，"精确版本"才是可复现。
 
 ### 2. 自检（不需要 MCP 客户端）
 
@@ -126,8 +138,8 @@ round(sin(radians(30)), 4)        -> 0.5
  │
  ├─ loader.py      扫描 faster_mcp/features/ 下的每个子包
  │                  ↓ 导入模块（import 本身就会触发注册）
- ├─ registry.py    功能模块调用 @mcp_feature / @feature_tool 装饰器
- │                  → 把自己登记进全局注册表 FeatureRegistry
+ ├─ registry.py    功能模块用 @feature_tool 装饰器标记工具
+ │                  → loader 收集 Feature 子类并登记进 FeatureRegistry
  │
  └─ server.py      遍历注册表 → 把每个工具挂到 FastMCP 实例上 → 运行
 ```

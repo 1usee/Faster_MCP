@@ -11,6 +11,9 @@ README 讲"怎么用"，这里讲"为什么这样设计"。需要改架构时看
 #         ├─ config.Settings.from_env()        读环境变量（服务名 / 功能启停 / 日志级别）
 #         │
 #         ├─ loader.load_features(settings)
+#         │     │  ★ 返回值是填好的 FeatureRegistry，不是 None：
+#         │     │     不传 target 时写入模块级全局单例（服务启动用）；
+#         │     │     传 target=自建实例可写入它（写测试时用，避免全局状态串味）。
 #         │     │
 #         │     ├─ pkgutil.iter_modules(features/)     扫描 features/ 下所有子包
 #         │     │        ↓ 找到 ["calculator", ...]

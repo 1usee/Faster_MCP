@@ -57,17 +57,98 @@ def test_integer_precision_is_preserved() -> None:
 
 
 def test_float_result_when_needed() -> None:
-    assert evaluate("1 / 3") == pytest.approx(1 / 3)
+    assert evaluate("1 / 3") == 1 / 3
     assert isinstance(evaluate("1 / 3"), float)
+
+
+# --------------------------------------------------------------------------- #
+# 浮点精度："精确计算"是本工具的核心卖点，必须用精确断言守住
+# --------------------------------------------------------------------------- #
+def test_constants_keep_full_precision() -> None:
+    """常量必须是**精确相等**，不能只满足 1e-6 的近似。
+
+    背景：早期实现把浮点结果统一 round(x, 12)，把 pi 从
+    3.141592653589793 削成 3.14159265359。而原来的测试用
+    pytest.approx（相对容差 1e-6）竟然能过——因为 12 位偏差远小于容差。
+    这里改用 `==`，让任何精度损失都立即失败。
+    """
+    assert evaluate("pi") == math.pi
+    assert evaluate("tau") == math.tau
+    assert evaluate("e") == math.e
+
+
+def test_repeating_decimal_keeps_full_precision() -> None:
+    """1/3 是无限循环小数，不能因为"四舍五入好看"就损失有效数字。"""
+    assert evaluate("1 / 3") == 1 / 3
+    assert evaluate("2 / 7") == 2 / 7
+
+
+def test_float_noise_is_still_cleaned() -> None:
+    """保留精度的同时，常见的浮点噪声仍要被收敛（这是该机制的存在理由）。"""
+    assert evaluate("0.1 + 0.2") == 0.3
+    assert evaluate("0.1 + 0.7") == 0.8
+    assert evaluate("1.1 * 3") == 3.3
+    assert evaluate("0.3 - 0.1") == 0.2
+
+
+def test_exact_float_results_are_not_rounded() -> None:
+    """能精确表示的浮点结果不应该被改动。"""
+    assert evaluate("2.5 + 2.5") == 5.0
+    assert evaluate("1 / 4") == 0.25
+    assert evaluate("1 / 8") == 0.125
+
+
+def test_trig_keeps_precision() -> None:
+    """三角函数的输出全部是无限小数，不能截断。"""
+    assert evaluate("sin(1)") == math.sin(1)
+    assert evaluate("cos(1)") == math.cos(1)
+
+
+# --------------------------------------------------------------------------- #
+# 能力清单与实现必须同步
+# --------------------------------------------------------------------------- #
+def test_describe_capabilities_lists_every_safe_function() -> None:
+    """describe_capabilities() 的函数清单是手写的，可能与 SAFE_FUNCTIONS 漂移。
+
+    漂移的后果：新加了函数但忘了写进清单，模型查询能力时看不到它，
+    于是不敢用——这个"先查后用"的工具就白做了。
+    这里用断言把"两份数据必须一致"变成机器可检查的约束。
+    """
+    from faster_mcp.features.calculator.safe_eval import (
+        SAFE_FUNCTIONS,
+        describe_capabilities,
+    )
+
+    caps = describe_capabilities()
+    listed: set[str] = set()
+    for names in caps["functions"].values():
+        listed.update(names)
+
+    missing = set(SAFE_FUNCTIONS) - listed
+    assert not missing, f"以下函数在 SAFE_FUNCTIONS 里但未写进能力清单：{sorted(missing)}"
+
+    extra = listed - set(SAFE_FUNCTIONS)
+    assert not extra, f"以下函数写进了能力清单但实现里不存在：{sorted(extra)}"
+
+
+def test_describe_capabilities_constants_match() -> None:
+    """清单里的常量也必须与 SAFE_CONSTANTS 一致。"""
+    from faster_mcp.features.calculator.safe_eval import (
+        SAFE_CONSTANTS,
+        describe_capabilities,
+    )
+
+    assert set(describe_capabilities()["constants"]) == set(SAFE_CONSTANTS)
 
 
 # --------------------------------------------------------------------------- #
 # 函数与常量
 # --------------------------------------------------------------------------- #
 def test_constants() -> None:
-    assert evaluate("pi") == pytest.approx(math.pi)
-    assert evaluate("tau") == pytest.approx(math.tau)
-    assert evaluate("e") == pytest.approx(math.e)
+    """常量的存在性与具体值（精确断言在 test_constants_keep_full_precision）。"""
+    assert evaluate("pi") == math.pi
+    assert evaluate("tau") == math.tau
+    assert evaluate("e") == math.e
 
 
 def test_trig_with_radians() -> None:
@@ -76,6 +157,8 @@ def test_trig_with_radians() -> None:
 
 
 def test_log_family() -> None:
+    # 对数底层走 C 库 math.log，不同平台末位可能差 1 ulp，
+    # 这不是本项目的精度问题，保留 approx 以免测试变成平台相关的。
     assert evaluate("log(e)") == pytest.approx(1.0)
     assert evaluate("log2(8)") == pytest.approx(3.0)
     assert evaluate("log10(1000)") == pytest.approx(3.0)
@@ -93,18 +176,35 @@ def test_combinatorics() -> None:
 
 def test_statistics_functions_accept_both_styles() -> None:
     """统计函数应同时接受可变参数和列表，对模型更宽容。"""
-    assert evaluate("mean(1, 2, 3)") == pytest.approx(2.0)
-    assert evaluate("mean([1, 2, 3])") == pytest.approx(2.0)
-    assert evaluate("median(1, 3, 2)") == pytest.approx(2.0)
-    assert evaluate("median(1, 2, 3, 4)") == pytest.approx(2.5)
+    assert evaluate("mean(1, 2, 3)") == 2.0
+    assert evaluate("mean([1, 2, 3])") == 2.0
+    assert evaluate("median(1, 3, 2)") == 2.0
+    assert evaluate("median(1, 2, 3, 4)") == 2.5
     assert evaluate("stdev(2, 4, 4, 4, 5, 5, 7, 9)") == pytest.approx(2.138, abs=1e-3)
+
+
+def test_statistics_reject_booleans() -> None:
+    """布尔不能被静默当成 1/0。
+
+    为什么单独提：Python 里 `True` 是 `int` 的子类，`float(True) == 1.0`。
+    若静默放行，模型写 `mean(True, False)` 会得到一个看似合理的 0.5，
+    把"传错了参数"伪装成"算对了"。convert() 的入参校验排除 bool，
+    这里必须保持一致。
+    """
+    with pytest.raises(ToolInputError):
+        evaluate("mean(True, False)")
+    with pytest.raises(ToolInputError):
+        evaluate("sum(1, True)")
+    with pytest.raises(ToolInputError):
+        evaluate("mean([True, 1])")
 
 
 # --------------------------------------------------------------------------- #
 # 变量与多步表达式
 # --------------------------------------------------------------------------- #
 def test_variable_definition_and_reuse() -> None:
-    assert evaluate("price = 199; price * 0.85") == pytest.approx(169.15)
+    # 精度保留后，169.15 这类有限小数可以精确相等
+    assert evaluate("price = 199; price * 0.85") == 169.15
 
 
 def test_multiple_statements() -> None:

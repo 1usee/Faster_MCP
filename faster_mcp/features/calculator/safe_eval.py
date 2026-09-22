@@ -168,6 +168,10 @@ def _as_seq(args: tuple[Any, ...]) -> list[float]:
     """把可变参数或单个可迭代对象统一成数字列表。
 
     这样 `mean(1,2,3)` 和 `median([1,2,3])` 都能用，对模型更宽容。
+
+    显式拒绝 bool：Python 里 `True` 是 `int` 的子类，若静默转成 1.0，
+    模型写 `mean(True, False)` 会得到一个看似合理的 0.5，把"传错了参数"
+    伪装成"算对了"。convert() 的入参校验同样排除 bool，这里保持一致。
     """
     if len(args) == 1 and isinstance(args[0], (list, tuple)):
         values = list(args[0])
@@ -175,6 +179,12 @@ def _as_seq(args: tuple[Any, ...]) -> list[float]:
         values = list(args)
     if not values:
         raise ToolInputError("至少需要提供一个数字。")
+    for v in values:
+        if isinstance(v, bool) or not isinstance(v, (int, float)):
+            raise ToolInputError(
+                f"统计函数只接受数字，收到 {v!r}（类型 {type(v).__name__}）。"
+                "布尔值 True/False 不会被当作 1/0 使用。"
+            )
     return [float(v) for v in values]
 
 
@@ -203,11 +213,34 @@ def _stdev(args: tuple[Any, ...]) -> float:
 
 
 def _normalize_numeric(value: Any) -> Any:
-    """收敛浮点尾部噪声，避免 `0.1 + 0.2` 这类可见但无意义的尾巴污染模型推理。"""
+    """收敛浮点尾部噪声，避免 `0.1 + 0.2` 这类可见但无意义的尾巴污染模型推理。
+
+    只对"非常接近某个短小数"的浮点做收敛，绝不牺牲有效数字。
+
+    反面教材（已修正）：早期实现直接 `round(value, 12)`，会把 `pi` 削成
+    3.14159265359、把 `1/3` 削成 0.333333333333——对一个主打精确计算的
+    工具来说，这等于自己制造误差；而且 12 位的偏差用 `pytest.approx`
+    （相对容差 1e-6）根本测不出来，属于静默劣化。
+
+    现在的策略：只有**两个条件同时成立**才采纳收敛值：
+      1. 与四舍五入到 12 位小数的结果，相对误差小于 1e-15
+         （约一个双精度 ulp，说明差异纯粹来自浮点噪声，而非有效数字）；
+      2. 收敛后的表示确实更短。
+    这样：
+      - `0.1 + 0.2` → 0.3            （尾部噪声被收敛）
+      - `pi`        → 3.141592653589793（保持全精度，不动）
+      - `1/3`       → 0.3333333333333333（保持全精度，不动）
+    """
     if not isinstance(value, float) or not math.isfinite(value):
         return value
+    if value == 0.0:
+        return 0.0  # 顺便消掉 -0.0
     rounded = round(value, 12)
-    if math.isclose(value, rounded, rel_tol=0.0, abs_tol=1e-12):
+    if rounded == value:
+        return value
+    # 仅当"收敛后的值"明显更短（即确实是浮点噪声，而非有效数字）才采纳。
+    # 判据：相对误差小于 1e-15（一个双精度 ulp 的量级），说明差异纯粹来自噪声。
+    if math.isclose(value, rounded, rel_tol=1e-15, abs_tol=0.0) and len(repr(rounded)) < len(repr(value)):
         return rounded
     return value
 
@@ -535,6 +568,10 @@ def describe_capabilities() -> dict[str, Any]:
     `comb` 还是 `loggamma`，就可能在表达式里瞎猜函数名，浪费一次调用。
     提供一个"先查后用"的工具，能显著降低试错次数——这是把 API 文档
     变成可调用工具的思路。
+
+    注意：函数清单是按类别分组的，分类信息无法从 SAFE_FUNCTIONS 自动推导，
+    因此这里保留手工维护；但 tests/test_safe_eval.py 里有一条同步测试，
+    会确保 SAFE_FUNCTIONS 里每个函数都出现在下面的清单中，防止两处漂移。
     """
     return {
         "functions": {
@@ -559,5 +596,6 @@ def describe_capabilities() -> dict[str, Any]:
             "max_expression_length": MAX_EXPRESSION_LENGTH,
             "max_power_exponent": MAX_POWER_EXPONENT,
             "max_factorial_input": MAX_FACTORIAL_INPUT,
+            "max_int_digits": MAX_INT_DIGITS,
         },
     }
